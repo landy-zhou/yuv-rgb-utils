@@ -2,126 +2,144 @@
 #include <string.h>
 #include <sys/time.h>
 
-int yuv422_to_rgb888(unsigned char *YUYV_image, unsigned char *RGB_image, unsigned int nWidth, unsigned int nHeight)
+char yuv_buf[1920*1080*2];
+char rgb_buf[1920*1080*4];
+int nv21_to_rgba(unsigned char *src,unsigned char *rgb,int width,int height );
+
+int main(int argc,char **argv)
 {
-    int x, y, yuyv[4],yuv[6],bgr[6];
-    unsigned char *pin, *pout;
-	for(y=0; y< nHeight; y++)
-	{
-	    pin = YUYV_image + y * nWidth * 2;
-	    pout = RGB_image + y * nWidth * 3;
-	    for(x=0; x<nWidth; x+=2)
-	    {
-			yuyv[0]=*(pin++);
-			yuyv[1]=*(pin++);
-			yuyv[2]=*(pin++);
-			yuyv[3]=*(pin++);
+    FILE *yuv_file;
+    FILE *rgb_file;
+    int width = 1920;
+    int height = 1080;
 
-			yuv[0] = yuyv[0];
-			yuv[1] = yuyv[1]-128;
-			yuv[2] = yuyv[3]-128;
-			yuv[3] = yuyv[2];
-			yuv[4] = yuyv[1]-128;
-			yuv[5] = yuyv[3]-128;
-			bgr[0]=yuv[1]+yuv[0];
-			bgr[2]=yuv[2]+yuv[0];
-			bgr[1]=yuv[0]-((3141*yuv[1]+8350*yuv[2])>>14);
-			bgr[3]=yuv[4]+yuv[3];
-			bgr[5]=yuv[5]+yuv[3];
-			bgr[4]=yuv[3]-((3141*yuv[4]+8350*yuv[5])>>14);
+    if( 3 > argc )
+    {
+	printf("Usage: exe in_yuv_file_path out_rgb_file_path\n");
+	return -1;
+    }
 
-			if(bgr[0]<0)bgr[0]=0;   if(bgr[0]>255)bgr[0]=255;
-			*(pout++)=(unsigned char) bgr[0];
+    yuv_file = fopen(argv[1],"r");
+    rgb_file = fopen(argv[2],"w");
+    if((!yuv_file)||(!rgb_file))
+    {
+	perror("fopen");
+	return -1;
+    }
+    if(0 > fread(yuv_buf,1,width*height*3/2,yuv_file))
+    {
+	perror("fread");
+	return -1;
+    }
 
-			if(bgr[1]<0)bgr[1]=0;   if(bgr[1]>255)bgr[1]=255;
-			*(pout++)=(unsigned char) bgr[1];
+    nv21_to_rgba(yuv_buf,rgb_buf,width,height);
 
-			if(bgr[2]<0)bgr[2]=0;   if(bgr[2]>255)bgr[2]=255;
-			*(pout++)=(unsigned char) bgr[2];
+    if(0 > fwrite(rgb_buf,1,width*height*4,rgb_file))
+    {
+	perror("fwrite");
+	return -1;
+    }
+    fflush(rgb_file);
+    fclose(yuv_file);
+    fclose(rgb_file);
 
-			if(bgr[3]<0)bgr[3]=0;   if(bgr[3]>255)bgr[3]=255;
-			*(pout++)=(unsigned char) bgr[3];
-
-			if(bgr[4]<0)bgr[4]=0;   if(bgr[4]>255)bgr[4]=255;
-			*(pout++)=(unsigned char) bgr[4];
-
-			if(bgr[5]<0)bgr[5]=0;   if(bgr[5]>255)bgr[5]=255;
-			*(pout++)=(unsigned char) bgr[5];
-		}
-	}
-	return 0;
+    return 0;
 }
 
-static int yuv_tbl_ready=0;
+static int yuv_tbl_ready_flag=0;
 static int y1192_tbl[256];
 static int v1634_tbl[256];
 static int v833_tbl[256];
 static int u400_tbl[256];
 static int u2066_tbl[256];
-void yuyv422toABGRY(unsigned char *src,unsigned char *rgb,int width,int height )
+int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int height )
 {
 
-    int frameSize =width*height*2;
+    int frame_size =width*height;
+    unsigned char (*src_y)[width],(*src_vu)[width];
+    int i,j;
 
-    int i;
-
-    if((!rgb)){
-        return;
-    }
-    int *lrgb = NULL;
-    int *lybuf = NULL;
-
-    lrgb = (int *)&rgb[0];
-    //lybuf = &ybuf[0];
-
-    if(yuv_tbl_ready==0){
-        for(i=0 ; i<256 ; i++){
-            y1192_tbl[i] = 1192*(i-16);
-            if(y1192_tbl[i]<0){
-                y1192_tbl[i]=0;
-            }
-
-            v1634_tbl[i] = 1634*(i-128);
-            v833_tbl[i] = 833*(i-128);
-            u400_tbl[i] = 400*(i-128);
-            u2066_tbl[i] = 2066*(i-128);
-        }
-        yuv_tbl_ready=1;
+    if((!rgb_buf)||(!src_buf)){
+	return -1;
     }
 
-    for(i=0 ; i<frameSize ; i+=4){
-        unsigned char y1, y2, u, v;
-        y1 = src[i];
-        u = src[i+1];
-        y2 = src[i+2];
-        v = src[i+3];
+    src_y = src_buf;
+    src_vu = src_buf + frame_size;
 
-        int y1192_1=y1192_tbl[y1];
-        int r1 = (y1192_1 + v1634_tbl[v])>>10;
-        int g1 = (y1192_1 - v833_tbl[v] - u400_tbl[u])>>10;
-        int b1 = (y1192_1 + u2066_tbl[u])>>10;
+    unsigned char (*rgb)[width*4] = rgb_buf;
 
-        int y1192_2=y1192_tbl[y2];
-        int r2 = (y1192_2 + v1634_tbl[v])>>10;
-        int g2 = (y1192_2 - v833_tbl[v] - u400_tbl[u])>>10;
-        int b2 = (y1192_2 + u2066_tbl[u])>>10;
+    if(yuv_tbl_ready_flag==0){
+	for(i=0 ; i<256 ; i++){
+	    y1192_tbl[i] = 1192*(i-16);
+	    if(y1192_tbl[i]<0){
+		y1192_tbl[i]=0;
+	    }
 
-        r1 = r1>255 ? 255 : r1<0 ? 0 : r1;
-        g1 = g1>255 ? 255 : g1<0 ? 0 : g1;
-        b1 = b1>255 ? 255 : b1<0 ? 0 : b1;
-        r2 = r2>255 ? 255 : r2<0 ? 0 : r2;
-        g2 = g2>255 ? 255 : g2<0 ? 0 : g2;
-        b2 = b2>255 ? 255 : b2<0 ? 0 : b2;
-
-        *lrgb++ = 0xff000000 | b1<<16 | g1<<8 | r1;
-        *lrgb++ = 0xff000000 | b2<<16 | g2<<8 | r2;
-
-        if(lybuf!=NULL){
-            *lybuf++ = y1;
-            *lybuf++ = y2;
-        }
+	    v1634_tbl[i] = 1634*(i-128);
+	    v833_tbl[i] = 833*(i-128);
+	    u400_tbl[i] = 400*(i-128);
+	    u2066_tbl[i] = 2066*(i-128);
+	}
+	yuv_tbl_ready_flag=1;
     }
 
+    for(i=0; i<height; i+=2){
+	for(j=0; j<width; j+=2){
+	    unsigned char y11,y12,y21,y22,u,v;
+	    int i_v = i>>1;  // index for vu buf
+	    int j_r = 4*j;  //index for rgba
+
+	    y11 = src_y[i][j];
+	    y12 = src_y[i][j+1];
+	    y21 = src_y[i+1][j];
+	    y22 = src_y[i+1][j+1];
+
+	    v = src_vu[i_v][j];
+	    u = src_vu[i_v][j+1];
+
+	    int y1192_11=y1192_tbl[y11];
+	    int r11 = (y1192_11 + v1634_tbl[v])>>10;
+	    int g11 = (y1192_11 - v833_tbl[v] - u400_tbl[u])>>10;
+	    int b11 = (y1192_11 + u2066_tbl[u])>>10;
+
+	    int y1192_12=y1192_tbl[y12];
+	    int r12 = (y1192_12 + v1634_tbl[v])>>10;
+	    int g12 = (y1192_12 - v833_tbl[v] - u400_tbl[u])>>10;
+	    int b12 = (y1192_12 + u2066_tbl[u])>>10;
+
+	    int y1192_21=y1192_tbl[y21];
+	    int r21 = (y1192_21 + v1634_tbl[v])>>10;
+	    int g21 = (y1192_21 - v833_tbl[v] - u400_tbl[u])>>10;
+	    int b21 = (y1192_21 + u2066_tbl[u])>>10;
+
+	    int y1192_22=y1192_tbl[y22];
+	    int r22 = (y1192_22 + v1634_tbl[v])>>10;
+	    int g22 = (y1192_22 - v833_tbl[v] - u400_tbl[u])>>10;
+	    int b22 = (y1192_22 + u2066_tbl[u])>>10;
+
+	    rgb[i][j_r+0] = r11>255 ? 255 : r11<0 ? 0 : r11;
+	    rgb[i][j_r+1] = g11>255 ? 255 : g11<0 ? 0 : g11;
+	    rgb[i][j_r+2] = b11>255 ? 255 : b11<0 ? 0 : b11;
+	    rgb[i][j_r+3] = 0xff;
+
+	    rgb[i][j_r+4] = r12>255 ? 255 : r12<0 ? 0 : r12;
+	    rgb[i][j_r+5] = g12>255 ? 255 : g12<0 ? 0 : g12;
+	    rgb[i][j_r+6] = b12>255 ? 255 : b12<0 ? 0 : b12;
+	    rgb[i][j_r+7] = 0xff;
+
+	    rgb[i+1][j_r+0] = r21>255 ? 255 : r21<0 ? 0 : r21;
+	    rgb[i+1][j_r+1] = g21>255 ? 255 : g21<0 ? 0 : g21;
+	    rgb[i+1][j_r+2] = b21>255 ? 255 : b21<0 ? 0 : b21;
+	    rgb[i+1][j_r+3] = 0xff;
+
+	    rgb[i+1][j_r+4] = r22>255 ? 255 : r22<0 ? 0 : r22;
+	    rgb[i+1][j_r+5] = g22>255 ? 255 : g22<0 ? 0 : g22;
+	    rgb[i+1][j_r+6] = b22>255 ? 255 : b22<0 ? 0 : b22;
+	    rgb[i+1][j_r+7] = 0xff;
+	}
+    }
+
+    return 0;
 }
 
 unsigned long measure_us(struct timeval *start, struct timeval *stop)
