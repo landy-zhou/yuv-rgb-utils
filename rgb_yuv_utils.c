@@ -1,7 +1,9 @@
 
 #include "rgb_yuv_utils.h"
 
+#define SYSTEM_BITS_IN_BYTES  (sizeof(void*))
 static int yuv_tbl_ready_flag=0;
+static int loop_times_once=2;
 static int y1192_tbl[256];
 static int v1634_tbl[256];
 static int v833_tbl[256];
@@ -12,17 +14,18 @@ void nv21_to_rgba_init(void)
 {
     int i;
     if(0 == yuv_tbl_ready_flag){
-	for(i=0 ; i<256 ; i++){
+	for(i=0; i<256; i++){
 	    y1192_tbl[i] = 1192*(i-16);
-	    if(y1192_tbl[i]<0){
-		y1192_tbl[i]=0;
+	    if(y1192_tbl[i] < 0){
+		y1192_tbl[i] = 0;
 	    }
 	    v1634_tbl[i] = 1634*(i-128);
 	    v833_tbl[i] = 833*(i-128);
 	    u400_tbl[i] = 400*(i-128);
 	    u2066_tbl[i] = 2066*(i-128);
 	}
-	yuv_tbl_ready_flag=1;
+	loop_times_once = SYSTEM_BITS_IN_BYTES/2;
+	yuv_tbl_ready_flag = 1;
     }
 }
 
@@ -30,22 +33,30 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
 {
 
     int frame_size =width*height;
-    unsigned char (*src_y)[width],(*src_vu)[width];
+    unsigned long *src_y,*src_vu;
     int i,j;
 
     if((!rgb_buf)||(!src_buf)){
 	return -1;
     }
 
-    src_y = src_buf;
-    src_vu = src_buf + frame_size;
-    unsigned char (*rgb)[width*4] = rgb_buf;
+    src_y = (unsigned long *)src_buf;
+    src_vu = (unsigned long *)(src_buf + frame_size);
+    unsigned long *rgb = (unsigned long *)rgb_buf;
 
     if(0 == yuv_tbl_ready_flag)
 	nv21_to_rgba_init();
 
-    for(i=0; i<height; i+=2){
-	for(j=0; j<width; j+=2){
+    int cnt_y = 0;
+    int longs_per_line = width/SYSTEM_BITS_IN_BYTES;
+    for(i=0; i<frame_size; i+=2*SYSTEM_BIT_IN_BYTES){
+	unsigned long y1 = *(src_y+cnt_y);
+	unsigned long y2 = *(src_y+cnt_y+longs_per_line);
+	cnt_y++;
+	if(cnt_y >= longs_per_line)
+	{
+	    src_y += 2*longs_per_line;
+	}
 	    unsigned char y11,y12,y21,y22,u,v;
 	    int i_v = i>>1;  // index for vu buf
 	    int j_r = j<<2;  //index for rgba
@@ -72,12 +83,13 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
 	    int r21 = (y1192_21 + v1634_tbl[v])>>10;
 	    int g21 = (y1192_21 - v833_tbl[v] - u400_tbl[u])>>10;
 	    int b21 = (y1192_21 + u2066_tbl[u])>>10;
-
+	    
 	    int y1192_22=y1192_tbl[y22];
 	    int r22 = (y1192_22 + v1634_tbl[v])>>10;
 	    int g22 = (y1192_22 - v833_tbl[v] - u400_tbl[u])>>10;
 	    int b22 = (y1192_22 + u2066_tbl[u])>>10;
 
+	    if(0 != r11&~0xff)
 	    rgb[i][j_r+0] = r11>255 ? 255 : r11<0 ? 0 : r11;
 	    rgb[i][j_r+1] = g11>255 ? 255 : g11<0 ? 0 : g11;
 	    rgb[i][j_r+2] = b11>255 ? 255 : b11<0 ? 0 : b11;
@@ -132,9 +144,9 @@ int rgba_to_yuv(unsigned char *src_buf,unsigned char *yuv_buf,int width,int heig
 	    v = (int)( 0.439*r - 0.368*g - 0.071*b) + 128;
 	    
 
-	    yuv[i][j_y+0] = y>255 ? 255 : y<0 ? 0 : y;
-	    yuv[i][j_y+1] = u>255 ? 255 : u<0 ? 0 : u;
-	    yuv[i][j_y+2] = v>255 ? 255 : v<0 ? 0 : v;
+	    yuv[i][j_y+0] = y;
+	    yuv[i][j_y+1] = u;
+	    yuv[i][j_y+2] = v;
 	    //printf("i=%d,j_r=%d\n",i,j_r);
 	}
 	//printf("i=%d\n",i);
