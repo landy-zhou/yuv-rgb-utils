@@ -1,50 +1,5 @@
-#include <stdio.h>
-#include <string.h>
-#include <sys/time.h>
 
-char yuv_buf[1920*1080*2];
-char rgb_buf[1920*1080*4];
-int nv21_to_rgba(unsigned char *src,unsigned char *rgb,int width,int height );
-
-int main(int argc,char **argv)
-{
-    FILE *yuv_file;
-    FILE *rgb_file;
-    int width = 1920;
-    int height = 1080;
-
-    if( 3 > argc )
-    {
-	printf("Usage: exe in_yuv_file_path out_rgb_file_path\n");
-	return -1;
-    }
-
-    yuv_file = fopen(argv[1],"r");
-    rgb_file = fopen(argv[2],"w");
-    if((!yuv_file)||(!rgb_file))
-    {
-	perror("fopen");
-	return -1;
-    }
-    if(0 > fread(yuv_buf,1,width*height*3/2,yuv_file))
-    {
-	perror("fread");
-	return -1;
-    }
-
-    nv21_to_rgba(yuv_buf,rgb_buf,width,height);
-
-    if(0 > fwrite(rgb_buf,1,width*height*4,rgb_file))
-    {
-	perror("fwrite");
-	return -1;
-    }
-    fflush(rgb_file);
-    fclose(yuv_file);
-    fclose(rgb_file);
-
-    return 0;
-}
+#include "rgb_yuv_utils.h"
 
 static int yuv_tbl_ready_flag=0;
 static int y1192_tbl[256];
@@ -52,7 +7,26 @@ static int v1634_tbl[256];
 static int v833_tbl[256];
 static int u400_tbl[256];
 static int u2066_tbl[256];
-int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int height )
+
+void nv21_to_rgba_init(void)
+{
+    int i;
+    if(0 == yuv_tbl_ready_flag){
+	for(i=0 ; i<256 ; i++){
+	    y1192_tbl[i] = 1192*(i-16);
+	    if(y1192_tbl[i]<0){
+		y1192_tbl[i]=0;
+	    }
+	    v1634_tbl[i] = 1634*(i-128);
+	    v833_tbl[i] = 833*(i-128);
+	    u400_tbl[i] = 400*(i-128);
+	    u2066_tbl[i] = 2066*(i-128);
+	}
+	yuv_tbl_ready_flag=1;
+    }
+}
+
+int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int height)
 {
 
     int frame_size =width*height;
@@ -65,23 +39,10 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
 
     src_y = src_buf;
     src_vu = src_buf + frame_size;
-
     unsigned char (*rgb)[width*4] = rgb_buf;
 
-    if(yuv_tbl_ready_flag==0){
-	for(i=0 ; i<256 ; i++){
-	    y1192_tbl[i] = 1192*(i-16);
-	    if(y1192_tbl[i]<0){
-		y1192_tbl[i]=0;
-	    }
-
-	    v1634_tbl[i] = 1634*(i-128);
-	    v833_tbl[i] = 833*(i-128);
-	    u400_tbl[i] = 400*(i-128);
-	    u2066_tbl[i] = 2066*(i-128);
-	}
-	yuv_tbl_ready_flag=1;
-    }
+    if(0 == yuv_tbl_ready_flag)
+	nv21_to_rgba_init();
 
     for(i=0; i<height; i+=2){
 	for(j=0; j<width; j+=2){
@@ -136,7 +97,9 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
 	    rgb[i+1][j_r+5] = g22>255 ? 255 : g22<0 ? 0 : g22;
 	    rgb[i+1][j_r+6] = b22>255 ? 255 : b22<0 ? 0 : b22;
 	    rgb[i+1][j_r+7] = 0xff;
+	    //printf("i=%d,j_r=%d\n",i,j_r);
 	}
+	//printf("i=%d\n",i);
     }
 
     return 0;
