@@ -48,7 +48,7 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
 	for(j=0; j<width; j+=2){
 	    unsigned char y11,y12,y21,y22,u,v;
 	    int i_v = i>>1;  // index for vu buf
-	    int j_r = 4*j;  //index for rgba
+	    int j_r = j<<2;  //index for rgba
 
 	    y11 = src_y[i][j];
 	    y12 = src_y[i][j+1];
