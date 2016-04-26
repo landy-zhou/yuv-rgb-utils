@@ -105,6 +105,44 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
     return 0;
 }
 
+int rgba_to_yuv(unsigned char *src_buf,unsigned char *yuv_buf,int width,int height)
+{
+
+    int i,j;
+    unsigned char (*rgb)[width*4] = src_buf;
+    unsigned char (*yuv)[width*3] = yuv_buf;
+
+    if((!yuv_buf)||(!src_buf)){
+	return -1;
+    }
+
+    for(i=0; i<height; i+=1){
+	for(j=0; j<width; j+=1){
+	    int y,u,v;
+	    float r,g,b;
+	    int j_r = j<<2; //rgb index
+	    int j_y = j*3;  //yuv index
+
+	    r = (float)rgb[i][j_r+0];
+	    g = (float)rgb[i][j_r+1];
+	    b = (float)rgb[i][j_r+2];
+
+	    y = (int)( 0.257*r + 0.504*g + 0.098*b) + 16;
+	    u = (int)(-0.148*r - 0.291*g + 0.439*b) + 128;
+	    v = (int)( 0.439*r - 0.368*g - 0.071*b) + 128;
+	    
+
+	    yuv[i][j_y+0] = y>255 ? 255 : y<0 ? 0 : y;
+	    yuv[i][j_y+1] = u>255 ? 255 : u<0 ? 0 : u;
+	    yuv[i][j_y+2] = v>255 ? 255 : v<0 ? 0 : v;
+	    //printf("i=%d,j_r=%d\n",i,j_r);
+	}
+	//printf("i=%d\n",i);
+    }
+
+    return 0;
+}
+
 unsigned long measure_us(struct timeval *start, struct timeval *stop)
 {
     unsigned long sec, usec, time;
