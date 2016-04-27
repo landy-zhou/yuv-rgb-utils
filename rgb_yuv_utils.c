@@ -2,6 +2,12 @@
 #include "rgb_yuv_utils.h"
 
 #define SYSTEM_BITS_IN_BYTES  (sizeof(void*))
+#define LOOPS_PER_LONG	(SYSTEM_BITS_IN_BYTES/2)
+
+//#define UCHAR_RANGE(x)	((0>x)?0:(x>255)?255:x)
+//#define UCHAR_RANGE(x)		(x)
+#define UCHAR_RANGE(x)	((unsigned long)uchar_range_tbl[x+300])
+
 static int yuv_tbl_ready_flag=0;
 static int loop_times_once=2;
 static int y1192_tbl[256];
@@ -9,6 +15,8 @@ static int v1634_tbl[256];
 static int v833_tbl[256];
 static int u400_tbl[256];
 static int u2066_tbl[256];
+
+static unsigned char uchar_range_tbl[1000];
 
 void nv21_to_rgba_init(void)
 {
@@ -24,9 +32,19 @@ void nv21_to_rgba_init(void)
 	    u400_tbl[i] = 400*(i-128);
 	    u2066_tbl[i] = 2066*(i-128);
 	}
-	loop_times_once = SYSTEM_BITS_IN_BYTES/2;
+	//-276~534,set tbl offset to 300
+	for(i=0; i<1000; i++){
+	    if(i<300)
+		uchar_range_tbl[i] = 0;
+	    else if(i>555)
+		uchar_range_tbl[i] = 255;
+	    else
+		uchar_range_tbl[i] = i-300;
+	    //printf("%d,",uchar_range_tbl[i]);
+	}
 	yuv_tbl_ready_flag = 1;
     }
+    //printf("SYSTEM_BITS_IN_BYTES=%d\n",SYSTEM_BITS_IN_BYTES);
 }
 
 int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int height)
@@ -42,32 +60,61 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
 
     src_y = (unsigned long *)src_buf;
     src_vu = (unsigned long *)(src_buf + frame_size);
-    unsigned long *rgb = (unsigned long *)rgb_buf;
 
     if(0 == yuv_tbl_ready_flag)
 	nv21_to_rgba_init();
 
-    int cnt_y = 0;
+    int cnt_long = 0;
     int longs_per_line = width/SYSTEM_BITS_IN_BYTES;
-    for(i=0; i<frame_size; i+=2*SYSTEM_BIT_IN_BYTES){
-	unsigned long y1 = *(src_y+cnt_y);
-	unsigned long y2 = *(src_y+cnt_y+longs_per_line);
-	cnt_y++;
-	if(cnt_y >= longs_per_line)
+    unsigned long y1 = *(src_y+cnt_long);
+    unsigned long y2 = *(src_y+cnt_long+longs_per_line);
+    unsigned long vu = *(src_vu+cnt_long);
+
+    unsigned char *rgb1 = rgb_buf;
+    unsigned char *rgb2 = rgb1+4*width;
+    //unsigned long *rgb1 = (unsigned long *)rgb_buf;
+    //unsigned long *rgb2 = rgb1+4*width/SYSTEM_BITS_IN_BYTES;
+
+    //process 2 lines X 1 long size once
+    for(i=0; i<frame_size; i+=2*SYSTEM_BITS_IN_BYTES){
+	cnt_long++;
+	//if reached the end of the line
+	if(cnt_long >= longs_per_line)
 	{
+	    //src buf skip to next two line
 	    src_y += 2*longs_per_line;
+	    src_vu += longs_per_line;
+
+	    //dst buf skip to next two line
+	    rgb1 += 4*width;
+	    rgb2 = rgb1+4*width;
+	    //rgb1 += 4*width/SYSTEM_BITS_IN_BYTES;
+	    //rgb2 = rgb1+4*width/SYSTEM_BITS_IN_BYTES;
+
+	    cnt_long = 0;
 	}
+	//read src buf per long size
+	y1 = *(src_y+cnt_long);
+	y2 = *(src_y+cnt_long+longs_per_line);
+	vu = *(src_vu+cnt_long);
+
+	//convert one long size per loop
+	for(j=0; j<LOOPS_PER_LONG; j+=1){
 	    unsigned char y11,y12,y21,y22,u,v;
-	    int i_v = i>>1;  // index for vu buf
-	    int j_r = j<<2;  //index for rgba
+	    int k = j<<4;
+	    //y11 = (y1>>(8*2*j))&0xff;
+	    //y12 = (y1>>(8*(2*j+1)))&0xff;
+	    //y21 = (y2>>(8*2*j))&0xff;;
+	    //y22 = (y2>>(8*(2*j+1)))&0xff;
+	    y11 = (y1>>k)&0xff;
+	    y12 = (y1>>(k+8))&0xff;
+	    y21 = (y2>>k)&0xff;;
+	    y22 = (y2>>(k+8))&0xff;
 
-	    y11 = src_y[i][j];
-	    y12 = src_y[i][j+1];
-	    y21 = src_y[i+1][j];
-	    y22 = src_y[i+1][j+1];
-
-	    v = src_vu[i_v][j];
-	    u = src_vu[i_v][j+1];
+	    //u = (vu>>(8*2*j))&0xff;
+	    //v = (vu>>(8*(2*j+1)))&0xff;
+	    u = (vu>>k)&0xff;
+	    v = (vu>>(k+8))&0xff;
 
 	    int y1192_11=y1192_tbl[y11];
 	    int r11 = (y1192_11 + v1634_tbl[v])>>10;
@@ -83,37 +130,44 @@ int nv21_to_rgba(unsigned char *src_buf,unsigned char *rgb_buf,int width,int hei
 	    int r21 = (y1192_21 + v1634_tbl[v])>>10;
 	    int g21 = (y1192_21 - v833_tbl[v] - u400_tbl[u])>>10;
 	    int b21 = (y1192_21 + u2066_tbl[u])>>10;
-	    
+
 	    int y1192_22=y1192_tbl[y22];
 	    int r22 = (y1192_22 + v1634_tbl[v])>>10;
 	    int g22 = (y1192_22 - v833_tbl[v] - u400_tbl[u])>>10;
 	    int b22 = (y1192_22 + u2066_tbl[u])>>10;
 
-	    if(0 != r11&~0xff)
-	    rgb[i][j_r+0] = r11>255 ? 255 : r11<0 ? 0 : r11;
-	    rgb[i][j_r+1] = g11>255 ? 255 : g11<0 ? 0 : g11;
-	    rgb[i][j_r+2] = b11>255 ? 255 : b11<0 ? 0 : b11;
-	    rgb[i][j_r+3] = 0xff;
+	    *rgb1++ = UCHAR_RANGE(r11);
+	    *rgb1++ = UCHAR_RANGE(g11);
+	    *rgb1++ = UCHAR_RANGE(b11);
+	    *rgb1++ = 0xff;
+	    
+	    *rgb1++ = UCHAR_RANGE(r12);
+	    *rgb1++ = UCHAR_RANGE(g12);
+	    *rgb1++ = UCHAR_RANGE(b12);
+	    *rgb1++ = 0xff;
 
-	    rgb[i][j_r+4] = r12>255 ? 255 : r12<0 ? 0 : r12;
-	    rgb[i][j_r+5] = g12>255 ? 255 : g12<0 ? 0 : g12;
-	    rgb[i][j_r+6] = b12>255 ? 255 : b12<0 ? 0 : b12;
-	    rgb[i][j_r+7] = 0xff;
+	    *rgb2++ = UCHAR_RANGE(r21);
+	    *rgb2++ = UCHAR_RANGE(g21);
+	    *rgb2++ = UCHAR_RANGE(b21);
+	    *rgb2++ = 0xff;
 
-	    rgb[i+1][j_r+0] = r21>255 ? 255 : r21<0 ? 0 : r21;
-	    rgb[i+1][j_r+1] = g21>255 ? 255 : g21<0 ? 0 : g21;
-	    rgb[i+1][j_r+2] = b21>255 ? 255 : b21<0 ? 0 : b21;
-	    rgb[i+1][j_r+3] = 0xff;
+	    *rgb2++ = UCHAR_RANGE(r22);
+	    *rgb2++ = UCHAR_RANGE(g22);
+	    *rgb2++ = UCHAR_RANGE(b22);
+	    *rgb2++ = 0xff;
 
-	    rgb[i+1][j_r+4] = r22>255 ? 255 : r22<0 ? 0 : r22;
-	    rgb[i+1][j_r+5] = g22>255 ? 255 : g22<0 ? 0 : g22;
-	    rgb[i+1][j_r+6] = b22>255 ? 255 : b22<0 ? 0 : b22;
-	    rgb[i+1][j_r+7] = 0xff;
-	    //printf("i=%d,j_r=%d\n",i,j_r);
+	    //*rgb1++ = UCHAR_RANGE(r11)|UCHAR_RANGE(g11)<<8|UCHAR_RANGE(b11)<<16|0xff<<24| \
+		    UCHAR_RANGE(r12)<<32|UCHAR_RANGE(g12)<<40|UCHAR_RANGE(b12)<<48|0xff<<56;
+
+	    //printf("%16x,",*(--rgb1));
+	    //if(SYSTEM_BITS_IN_BYTES)
+
+	    //*rgb2++ = UCHAR_RANGE(r21)|UCHAR_RANGE(g21)<<8|UCHAR_RANGE(b21)<<16|0xff<<24| \
+		    UCHAR_RANGE(r22)<<32|UCHAR_RANGE(g22)<<40|UCHAR_RANGE(b22)<<48|0xff<<56;
+	    //printf("i=%d,j=%d,rgb1=%d,rgb2=%d\n",i,j,rgb1,rgb2);
 	}
-	//printf("i=%d\n",i);
     }
-
+    //printf("i=%d\n",i);
     return 0;
 }
 
@@ -142,7 +196,7 @@ int rgba_to_yuv(unsigned char *src_buf,unsigned char *yuv_buf,int width,int heig
 	    y = (int)( 0.257*r + 0.504*g + 0.098*b) + 16;
 	    u = (int)(-0.148*r - 0.291*g + 0.439*b) + 128;
 	    v = (int)( 0.439*r - 0.368*g - 0.071*b) + 128;
-	    
+
 
 	    yuv[i][j_y+0] = y;
 	    yuv[i][j_y+1] = u;

@@ -20,7 +20,7 @@ int main(int argc,char **argv)
     int width = WIDTH;
     int height = HEIGHT;
     struct timeval start_time,end_time;
-    char out_yuv_path[30];
+    char out_yuv_path[100];
 
     IplImage *rgb_frame = cvCreateImageHeader(cvSize(WIDTH, HEIGHT),IPL_DEPTH_8U,4);
     IplImage *yuv_frame = cvCreateImageHeader(cvSize(WIDTH, HEIGHT),IPL_DEPTH_8U,3);
